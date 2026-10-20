@@ -78,6 +78,29 @@ export function parseDb(value) {
   return Number.isFinite(db) && db >= -120 && db <= 30 ? db : undefined;
 }
 
+/**
+ * Whether a line of `key` answering a `key=sent` command confirms it: the
+ * value asked (On/Off, dB within 0.5, a source without case). Any other
+ * value (a late answer, a refusal, a pushed change) is a state, not a
+ * confirmation.
+ */
+export function confirmsSet(key, sent, answered) {
+  switch (key.toLowerCase()) {
+    case 'main.power':
+    case 'main.mute': {
+      const asked = parseOnOff(sent);
+      return asked !== undefined && parseOnOff(answered) === asked;
+    }
+    case 'main.volume': {
+      const asked = parseDb(sent);
+      const got = parseDb(answered);
+      return asked !== undefined && got !== undefined && Math.abs(got - asked) <= 0.5;
+    }
+    default:
+      return String(answered).toLowerCase() === String(sent).toLowerCase();
+  }
+}
+
 /** A source value (a number on most models, a name on some): kept only when safe to send back. */
 export function parseSource(value) {
   return isSafeValue(value) ? value : undefined;
@@ -191,7 +214,10 @@ export class TelnetFilter {
           break;
         case 'option': {
           const id = this.verb * 256 + byte;
-          if ((this.verb === DO || this.verb === WILL) && !this.answered.has(id)) {
+          // Never an LF, CR or 255 byte written back (outside the `\n<command>\r`
+          // framing): those options are left unanswered.
+          const writable = byte !== 10 && byte !== 13 && byte !== IAC;
+          if ((this.verb === DO || this.verb === WILL) && writable && !this.answered.has(id)) {
             if (this.answered.size < 64) {
               this.answered.add(id);
               replies.push(Buffer.from([IAC, this.verb === DO ? WONT : DONT, byte]));

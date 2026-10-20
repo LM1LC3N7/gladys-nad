@@ -84,6 +84,12 @@ up to date at the end of every milestone.
   `requestTimeout` or the rest of a command budget), cancels a Power on still
   queued ("Cancelled by Standby, nothing sent") and the volume checks after a
   wake-up, and no check chain starts for a Power on pressed before it.
+  (Review 1, B1) A Power on whose task already runs but whose line still
+  waits on the connection (behind a poll query) is dropped too: `exchange`
+  takes `shouldSend`, asked again in `pump()` right before `onSent` and the
+  write; Power on passes "no Standby asked since my request" and is then
+  answered "Cancelled by Standby, nothing sent" (CANCELLED). Its volume check
+  after the wake-up stops the same way.
 - **Volume cap** (brief: "volume plafonné par option"): the device counts in
   dB; Gladys shows 0..100 % mapped linearly onto `min_volume_db` (-80 dB by
   default, -99..-21) .. `max_volume_db` (-20 dB by default, -80..0), as Home
@@ -102,7 +108,19 @@ up to date at the end of every milestone.
   sent) and Power on (`Main.Power?` and `Main.Volume?` read again after the
   wake-up, lowered when above; when the device cannot tell yet, checked again
   every 2.5 s, 6 times at most, through the device queue; the ack of Power on
-  never depends on it). Volumes are sent as integer dB.
+  never depends on it). Volumes are sent as integer dB. (Review 1, I2) The
+  lowering counts only when the device confirms it (I1) and gives back a
+  volume at or under the cap: otherwise the unmute is refused ("volume not
+  lowered to the cap, mute kept", `Main.Mute=Off` never sent) and the wake-up
+  checks go on. (Review 1, M2) For the window of those checks (6 × 2.5 s)
+  after a Power on, a `Main.Volume` pushed above the cap (a device applying
+  its power-on volume late) is lowered too, through the device queue, one at
+  a time per device; Standby ends the window.
+- Publication rate (review 1, M3): the grouping delay of a device is
+  `publishDelay` × the number of created devices, so all the devices together
+  stay near one publication (4 states at most) a second, under the 300 states
+  a minute of Gladys, whatever a device pushes (the flood guard closes the
+  connection beyond 300 lines in 10 s).
 - Volume validated strictly before queueing: an integer 0..100 as a number or
   a string of digits; null, '', booleans, 12.5, '12abc', NaN refused.
 - Mute is a push (Gladys sends a press, not a target): `Main.Mute?` read
@@ -126,8 +144,13 @@ up to date at the end of every milestone.
   out is **not** dropped (unlike gladys-cambridge-audio): a NAD line always
   carries the state of the device when it wrote it, so it is a fresh state;
   dropping it made a device that ignored a query while off unreadable after
-  waking up. Known limit, without danger: such a late line can confirm the
-  next exchange on the same key; the following pushed line shows the truth.
+  waking up. Such a line answers a query (`?`) of its key. (Review 1, I1) A
+  command (`=`) is confirmed **only by a line carrying the value asked**
+  (`confirmsSet`: On/Off by `parseOnOff`, dB by `parseDb` within 0.5, a
+  source without case): a late answer, a refusal (`Main.Power=On` after
+  `Main.Power=Off`) or a pushed change of another value is applied to the
+  state but never settles the command, which ends at its deadline as "sent,
+  without confirmation".
 - Connection: one TCP connection per typed address and per created device,
   kept across reconnections to Gladys (`connected` only clears the status
   cache and `forgetPublishedStates`, then republishes the status, the
@@ -144,7 +167,10 @@ up to date at the end of every milestone.
   starting over at 10 s is wanted.
 - Hostile input: the telnet negotiation is refused as Python's telnetlib does
   (DO -> WONT, WILL -> DONT), once per option and 64 options at most, so a
-  repeating device never makes this side loop; sub-negotiations skipped.
+  repeating device never makes this side loop; sub-negotiations skipped. The
+  options 10, 13 and 255 are left unanswered (review 1, M1): no LF, CR or 255
+  byte is ever written outside the `\n<command>\r` framing. The link uses its
+  injected clock and timers everywhere (review 1, M4).
   Lines cut on CR or LF, 256 characters at most (a longer one is dropped up
   to its end, never kept growing), decoded as Latin-1, one anchored
   expression per line (key of 2 to 4 dotted parts, value of 128 printable

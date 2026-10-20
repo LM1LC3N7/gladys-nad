@@ -401,6 +401,131 @@ test('check the devices', async (t) => {
   assert.match(ack.data.message.fr, /le plafond/);
 });
 
+// --- Review 1 (S1 to S5 of the hostile scenarios) ---------------------------------
+
+test('S1: a Standby pressed after a Power on waiting behind a poll query wins', async (t) => {
+  const ctx = await setup(t, { deviceOptions: { names: false, state: { 'Main.Power': 'Off' } } });
+  const device = await createDevice(ctx);
+  const link = [...ctx.app.links.values()][0];
+  // In standby only Main.Power is answered: the poll's Main.Volume? stays in flight.
+  const poll = link.poll();
+  await waitFor(() => ctx.fake.received.at(-1) === 'Main.Volume?', 'the poll volume query');
+  const on = set(ctx, device, 'power_on');
+  await settle(20);
+  const off = set(ctx, device, 'standby');
+  const [a, b] = await Promise.all([on, off]);
+  await poll;
+  await settle(100);
+  assert.equal(b.success, true);
+  assert.equal(a.success, false);
+  assert.match(a.error, /Cancelled by Standby, nothing sent/);
+  assert.deepEqual(ctx.fake.commands(), ['Main.Power=Off']);
+  assert.equal(ctx.fake.state['Main.Power'], 'Off');
+});
+
+test('S2: a late answer of another value never confirms a volume command', async (t) => {
+  const ctx = await setup(t, {
+    deviceOptions: { names: false, delays: { 'Main.Volume': 400 } },
+    timings: { commandBudget: 700 },
+  });
+  const device = await createDevice(ctx);
+  const link = [...ctx.app.links.values()][0];
+  const poll = link.poll();
+  await waitFor(() => ctx.fake.received.at(-1) === 'Main.Volume?', 'the poll volume query');
+  await settle(320);
+  // The device now ignores the command; the late "Main.Volume=-30" is still on its way.
+  ctx.fake.unanswered.add('Main.Volume');
+  const ack = await set(ctx, device, 'volume', 50);
+  await poll;
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /Sent, without confirmation/);
+  assert.equal(ctx.fake.state['Main.Volume'], '-30');
+});
+
+test('S3: a contradicting answer (Main.Power=On) never confirms Standby', async (t) => {
+  const ctx = await setup(t, {
+    deviceOptions: { names: false, ignoreSet: ['Main.Power'] },
+    timings: { commandBudget: 600 },
+  });
+  const device = await createDevice(ctx);
+  const ack = await set(ctx, device, 'standby');
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /Sent, without confirmation/);
+  // The answer is still a state: power 1 kept.
+  assert.equal(ctx.gladys.fake.lastState(ctx.id('power')), 1);
+});
+
+test('S4: unmute is refused when the device does not lower its volume to the cap', async (t) => {
+  const ctx = await setup(t, {
+    deviceOptions: {
+      names: false,
+      state: { 'Main.Mute': 'On', 'Main.Volume': '-5' },
+      ignoreSet: ['Main.Volume'],
+    },
+    timings: { commandBudget: 800 },
+  });
+  const device = await createDevice(ctx);
+  const ack = await set(ctx, device, 'mute');
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /volume not lowered to the cap .*mute kept/);
+  assert.deepEqual(ctx.fake.commands(), ['Main.Volume=-20']);
+  assert.equal(ctx.fake.state['Main.Mute'], 'On');
+});
+
+test('S5: after a wake-up, an unconfirmed lowering keeps the checks going', async (t) => {
+  const ctx = await setup(t, {
+    deviceOptions: {
+      names: false,
+      state: { 'Main.Power': 'Off' },
+      wakeVolume: '-3',
+      ignoreSet: ['Main.Volume'],
+    },
+    timings: { preRead: 150, requestTimeout: 150 },
+  });
+  const device = await createDevice(ctx);
+  assert.equal((await set(ctx, device, 'power_on')).success, true);
+  await waitFor(
+    () => ctx.logs.some((l) => /volume not confirmed after waking up/.test(l)),
+    'the end of the checks',
+    6_000,
+  );
+  const lowerings = ctx.fake.commands().filter((l) => l === 'Main.Volume=-20').length;
+  assert.ok(lowerings >= 3, `${lowerings} lowerings`);
+  assert.equal(ctx.app.wakeChecks.size, 0);
+});
+
+test('a volume pushed above the cap just after a wake-up is lowered', async (t) => {
+  const ctx = await setup(t, {
+    deviceOptions: { names: false, state: { 'Main.Power': 'Off' } },
+    timings: { wakeCheckDelay: 200 },
+  });
+  const device = await createDevice(ctx);
+  assert.equal((await set(ctx, device, 'power_on')).success, true);
+  assert.deepEqual(ctx.fake.commands(), ['Main.Power=On']);
+  ctx.fake.state['Main.Volume'] = '-4';
+  ctx.fake.push('Main.Volume=-4');
+  await waitFor(() => ctx.fake.commands().includes('Main.Volume=-20'), 'the volume lowered');
+  assert.equal(ctx.fake.state['Main.Volume'], '-20');
+});
+
+test('the publication delay grows with the number of created devices', async (t) => {
+  const ctx = await setup(t);
+  await createDevice(ctx);
+  const delays = [];
+  const original = ctx.app.timers;
+  ctx.app.timers = {
+    ...original,
+    setTimeout: (fn, ms) => {
+      delays.push(ms);
+      return original.setTimeout(fn, ms);
+    },
+  };
+  ctx.app.created = new Set(['a', 'b', 'c']);
+  ctx.app.schedulePublish('a');
+  ctx.app.timers = original;
+  assert.deepEqual(delays, [FAST.publishDelay * 3]);
+});
+
 test('parseVolumeCommand', () => {
   assert.equal(parseVolumeCommand(0), 0);
   assert.equal(parseVolumeCommand(' 42 '), 42);

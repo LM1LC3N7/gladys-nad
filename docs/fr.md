@@ -64,11 +64,16 @@ dans les deux cas où Gladys le rendrait audible :
 
 - **Retrait de la sourdine** : si le volume de l'appareil dépasse le plafond,
   il est d'abord ramené au plafond, puis la sourdine est retirée. Si le
-  volume ne peut pas être lu, rien n'est envoyé.
+  volume ne peut pas être lu, rien n'est envoyé ; si l'appareil ne confirme
+  pas la baisse, la sourdine est gardée.
 - **Allumage** : après le réveil, le volume est relu et ramené au plafond
-  s'il le dépasse. Si l'appareil est lent à se réveiller, l'intégration
-  vérifie encore quelques fois pendant environ 15 secondes ; ensuite le
-  volume n'est plus corrigé.
+  s'il le dépasse, jusqu'à ce que l'appareil confirme un volume au plafond ou
+  en dessous. Si l'appareil est lent à se réveiller, l'intégration vérifie
+  encore quelques fois pendant environ 15 secondes, et baisse un volume
+  signalé au-dessus du plafond pendant ce temps ; ensuite le volume n'est
+  plus corrigé.
+
+Une commande n'est réussie que si l'appareil répond la valeur demandée.
 
 ## Sources
 

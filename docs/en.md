@@ -59,11 +59,15 @@ where Gladys would make it heard:
 
 - **Unmute**: when the volume of the device is above the cap, it is set to
   the cap first, then the mute is removed. When the volume cannot be read,
-  nothing is sent.
+  nothing is sent; when the device does not confirm the lower volume, the
+  mute is kept.
 - **Power on**: after the wake-up, the volume is read again and set to the
-  cap when above it. When the device is slow to wake up, the integration
-  checks again a few times for about 15 seconds; after that the volume is not
-  corrected.
+  cap when above it, until the device confirms a volume at or under the cap.
+  When the device is slow to wake up, the integration checks again a few
+  times for about 15 seconds, and lowers a volume the device reports above
+  the cap during that time; after that the volume is not corrected.
+
+A command counts as done only when the device answers the value asked.
 
 ## Sources
 

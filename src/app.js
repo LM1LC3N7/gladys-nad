@@ -74,6 +74,10 @@ export class NadApp {
     this.wakeChecks = new Map();
     /** device id -> when the last Standby was asked */
     this.standbyAt = new Map();
+    /** device id -> until when a volume pushed above the cap is lowered (after Power on) */
+    this.wakeWatch = new Map();
+    /** ids of the devices whose volume is being lowered by watchWakeVolume */
+    this.lowering = new Set();
     this.generation = 0;
     this.tickTimer = undefined;
     this.persistTimer = undefined;
@@ -359,6 +363,9 @@ export class NadApp {
           this.logger.warn(`Could not publish the devices: ${err.message}`),
         );
       }
+      if (extra === 'main.volume' || extra === 'main.power') {
+        this.watchWakeVolume(device, link);
+      }
       this.schedulePublish(device.id);
     } else if (event === 'failed') {
       // The device known at this address does not answer: power 0.
@@ -532,8 +539,13 @@ export class NadApp {
 
   // --- States --------------------------------------------------------------------
 
-  /** The states of a device, grouped: at most one publication per `publishDelay`. */
-  schedulePublish(id, delay = this.timings.publishDelay) {
+  /**
+   * The states of a device, grouped: at most one publication per
+   * `publishDelay` times the number of created devices, so all the devices
+   * together stay near one publication (4 states at most) per `publishDelay`,
+   * far under the 300 states a minute of Gladys.
+   */
+  schedulePublish(id, delay = this.timings.publishDelay * Math.max(1, this.created.size)) {
     if (this.publishTimers.has(id)) {
       if (delay > 0) {
         return;
@@ -624,6 +636,7 @@ export class NadApp {
       // queue (and goes first on the connection), and cancels a Power on still
       // waiting and the volume checks after a wake-up.
       this.standbyAt.set(device.id, started);
+      this.wakeWatch.delete(device.id);
       this.cancelWakeCheck(device.id);
       this.cancelQueued(device.id, FEATURES.POWER_ON, 'Cancelled by Standby, nothing sent');
       run = this.command(device, key, checked, started, context);
@@ -681,10 +694,11 @@ export class NadApp {
    * reached the device is never reported as "not sent": "sent, without
    * confirmation" (the line pushed by the device shows what it did).
    */
-  async send(device, link, key, value, started, context, { priority = false } = {}) {
+  async send(device, link, key, value, started, context, { priority = false, shouldSend } = {}) {
     try {
       return await link.exchange(key, '=', value, this.remaining(started), {
         priority,
+        shouldSend,
         onSent: () => {
           context.mayHaveSent = true;
         },
@@ -702,6 +716,9 @@ export class NadApp {
             ? 'No time left for this command, nothing sent'
             : `${deviceName(device)} is not connected: nothing sent`,
         );
+      }
+      if (err.kind === ERROR_KINDS.CANCELLED) {
+        throw new DeviceError(err.kind, 'Cancelled by Standby, nothing sent');
       }
       throw err;
     }
@@ -740,16 +757,29 @@ export class NadApp {
       case FEATURES.POWER_ON: {
         // A new press starts over: the check chain of the previous one stops.
         this.cancelWakeCheck(device.id);
-        const pressed = this.now();
-        await send(KEYS.POWER, 'On');
+        // A Standby asked after this press wins: checked again right before
+        // the line is written (it may wait behind a poll query on the
+        // connection), and before every step after it.
+        const alive = () => (this.standbyAt.get(device.id) ?? -Infinity) < started;
+        await send(KEYS.POWER, 'On', { shouldSend: alive });
+        if (!alive()) {
+          return undefined;
+        }
+        // A volume pushed above the cap while the device wakes up is lowered too.
+        this.wakeWatch.set(
+          device.id,
+          this.now() + this.timings.wakeChecks * this.timings.wakeCheckDelay,
+        );
         // A device wakes up at the volume it had: brought back to the cap.
         // Within what is left of this command first, then in the background
         // while the device is still waking up. The ack never depends on it.
-        const done = await this.capVolume(device, link, () =>
-          Math.min(this.timings.preRead, this.remaining(started) - 100),
+        const done = await this.capVolume(
+          device,
+          link,
+          () => Math.min(this.timings.preRead, this.remaining(started) - 100),
+          alive,
         ).catch(() => false);
-        // No check chain once a Standby was asked after this press.
-        if (!done && (this.standbyAt.get(device.id) ?? -Infinity) < pressed) {
+        if (!done && alive()) {
           this.capAfterWake(device, 1);
         }
         return undefined;
@@ -784,7 +814,26 @@ export class NadApp {
             this.logger.info(
               `${deviceName(device)}: volume ${volume} dB lowered to ${cap} dB before unmuting`,
             );
-            await send(KEYS.VOLUME, formatDb(cap));
+            try {
+              await send(KEYS.VOLUME, formatDb(cap));
+            } catch (err) {
+              if (err.sent) {
+                throw new DeviceError(
+                  ERROR_KINDS.TIMEOUT,
+                  `${deviceName(device)}: volume not lowered to the cap (sent, without confirmation), mute kept`,
+                  { sent: true },
+                );
+              }
+              throw err;
+            }
+            // Unmuted only once the device says it is at or under the cap.
+            if (!(link.state.volume <= cap)) {
+              throw new DeviceError(
+                ERROR_KINDS.TIMEOUT,
+                `${deviceName(device)}: volume not lowered to the cap, mute kept`,
+                { sent: true },
+              );
+            }
           }
         }
         await send(KEYS.MUTE, mute ? 'Off' : 'On');
@@ -801,14 +850,15 @@ export class NadApp {
   /**
    * Reads the power and the volume, and lowers the volume to the cap when the
    * device is on and above it. True when settled (lowered, or nothing to
-   * lower), false when the device cannot tell yet (waking up).
+   * lower), false when the device cannot tell yet (waking up) or did not
+   * confirm the lowering (the checks go on). `alive` false stops it.
    */
-  async capVolume(device, link, budget) {
-    if (budget() <= 0 || !link.connected) {
+  async capVolume(device, link, budget, alive = () => true) {
+    if (budget() <= 0 || !link.connected || !alive()) {
       return false;
     }
     await link.query(KEYS.POWER, budget());
-    if (link.state.power !== true || budget() <= 0) {
+    if (link.state.power !== true || budget() <= 0 || !alive()) {
       return false;
     }
     await link.query(KEYS.VOLUME, budget());
@@ -825,7 +875,32 @@ export class NadApp {
     }
     this.logger.info(`${deviceName(device)}: woke up at ${volume} dB, lowered to ${cap} dB`);
     await link.exchange(KEYS.VOLUME, '=', formatDb(cap), budget());
-    return true;
+    // Settled only on the volume the device gives back, never on the command alone.
+    return link.state.volume <= this.config.maxDb;
+  }
+
+  /**
+   * A volume pushed above the cap while a device wakes up (within the window
+   * of the checks after Power on): lowered through the device queue, one at
+   * a time per device.
+   */
+  watchWakeVolume(device, link) {
+    const until = this.wakeWatch.get(device.id);
+    if (until === undefined || this.now() > until || this.lowering.has(device.id)) {
+      return;
+    }
+    if (link.state.power !== true || !(link.state.volume > this.config.maxDb)) {
+      return;
+    }
+    this.lowering.add(device.id);
+    this.enqueue(device.id, () => {
+      const current = this.connectedLink(device);
+      return current && this.wakeWatch.has(device.id)
+        ? this.capVolume(device, current, () => this.timings.preRead)
+        : false;
+    })
+      .catch(() => false)
+      .finally(() => this.lowering.delete(device.id));
   }
 
   /** Cancels the wake-up check chain of a device, if any. */
@@ -864,7 +939,7 @@ export class NadApp {
         if (!link || !current()) {
           return !current();
         }
-        return this.capVolume(device, link, () => this.timings.preRead);
+        return this.capVolume(device, link, () => this.timings.preRead, current);
       })
         .catch(() => false)
         .then((done) => {

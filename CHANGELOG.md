@@ -34,10 +34,24 @@ the notes of the version's GitHub Release.
   doubled up to 5 minutes.
 - "Check the devices" button.
 
+### Fixed
+
+- Standby also cancels a Power on whose line still waits on the connection
+  (for example behind a poll): it is never written after the Standby.
+- A command is confirmed only by the value it asked: a late or contradicting
+  answer from the device is reported "sent, without confirmation".
+- Unmuting is refused, mute kept, when the device does not lower its volume
+  to the cap; after Power on, the checks go on until the volume is at or
+  under the cap, and a volume pushed above the cap shortly after the wake-up
+  is lowered too.
+- The publication of the states slows down with the number of devices, so
+  the whole integration stays under the rate Gladys accepts.
+
 ### Security
 
 - Lines are bounded (256 characters) and parsed once by an anchored
   expression; only the expected keys are read; a value is written back to the
   device only when it holds no line break nor space; the telnet negotiation is
-  refused once per option; a connection flooded with lines is closed. The
+  refused once per option, and never answered with an LF, CR or 255 byte; a
+  connection flooded with lines is closed. The
   device table of `/data` has no prototype.

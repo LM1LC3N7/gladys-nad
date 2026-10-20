@@ -6,6 +6,7 @@ import {
   TelnetFilter,
   applyLine,
   cleanText,
+  confirmsSet,
   encode,
   isSafeValue,
   parseDb,
@@ -42,6 +43,17 @@ test('lines: anchored, bounded, key lowercased', () => {
   ]) {
     assert.equal(parseLine(bad), undefined, JSON.stringify(bad).slice(0, 40));
   }
+});
+
+test('a command is confirmed only by the value it asked', () => {
+  assert.equal(confirmsSet(KEYS.POWER, 'Off', 'off'), true);
+  assert.equal(confirmsSet(KEYS.POWER, 'Off', 'On'), false);
+  assert.equal(confirmsSet(KEYS.MUTE, 'On', '?'), false);
+  assert.equal(confirmsSet(KEYS.VOLUME, '-40', '-40.5dB'), true);
+  assert.equal(confirmsSet(KEYS.VOLUME, '-40', '-30'), false);
+  assert.equal(confirmsSet(KEYS.VOLUME, '-40', 'junk'), false);
+  assert.equal(confirmsSet(KEYS.SOURCE, 'Coaxial1', 'COAXIAL1'), true);
+  assert.equal(confirmsSet(KEYS.SOURCE, '2', '1'), false);
 });
 
 test('values', () => {
@@ -91,6 +103,11 @@ test('telnet: commands removed, every option refused once', () => {
       [255, 252, 1],
       [255, 254, 3],
     ],
+  );
+  // Never an LF, CR or 255 written back (review 1, M1).
+  assert.deepEqual(
+    new TelnetFilter().feed(Buffer.from([255, 253, 13, 255, 251, 10, 255, 253, 255, 77])),
+    { data: Buffer.from([77]), replies: [] },
   );
   // Split across chunks.
   const split = new TelnetFilter();

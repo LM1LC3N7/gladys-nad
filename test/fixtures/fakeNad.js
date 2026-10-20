@@ -35,6 +35,8 @@ export async function startFakeNad(options = {}) {
     silent: Boolean(options.silent),
     /** What Main.Volume becomes on Main.Power=On (a device waking up at its old volume). */
     wakeVolume: options.wakeVolume,
+    /** Keys whose `=` is not applied: the current value is answered. */
+    ignoreSet: new Set(options.ignoreSet ?? []),
     commands() {
       return this.received.filter((line) => line.includes('='));
     },
@@ -92,7 +94,10 @@ export async function startFakeNad(options = {}) {
       if (state['Main.Power'] === 'Off' && key !== 'Main.Power' && !options.answerWhenOff) {
         return;
       }
-      state[key] = match[3];
+      // `ignoreSet`: the device keeps its value and answers it (a refusal).
+      if (!fake.ignoreSet.has(key)) {
+        state[key] = match[3];
+      }
       if (key === 'Main.Power' && match[3] === 'On' && fake.wakeVolume !== undefined) {
         state['Main.Volume'] = fake.wakeVolume;
       }

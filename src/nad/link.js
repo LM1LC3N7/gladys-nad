@@ -23,6 +23,7 @@ import {
   LineSplitter,
   TelnetFilter,
   applyLine,
+  confirmsSet,
   encode,
   parseLine,
   sourceNameKey,
@@ -39,6 +40,8 @@ export const ERROR_KINDS = Object.freeze({
   PROTOCOL: 'protocol',
   /** No time left: nothing was sent. */
   BUDGET: 'budget',
+  /** Dropped before it was written (a Standby asked after it): nothing was sent. */
+  CANCELLED: 'cancelled',
 });
 
 export class DeviceError extends Error {
@@ -159,7 +162,7 @@ export class NadLink {
     return new Promise((resolve, reject) => {
       let settled = false;
       let socket;
-      const timer = setTimeout(() => {
+      const timer = this.timers.setTimeout(() => {
         if (!settled) {
           settled = true;
           socket?.destroy();
@@ -169,7 +172,7 @@ export class NadLink {
       try {
         socket = this.connectSocket({ host: this.host, port: this.port });
       } catch (err) {
-        clearTimeout(timer);
+        this.timers.clearTimeout(timer);
         settled = true;
         reject(new DeviceError(ERROR_KINDS.UNREACHABLE, `Cannot connect: ${err.message}`));
         return;
@@ -177,7 +180,7 @@ export class NadLink {
       socket.once('error', (err) => {
         if (!settled) {
           settled = true;
-          clearTimeout(timer);
+          this.timers.clearTimeout(timer);
           socket.destroy();
           reject(
             new DeviceError(ERROR_KINDS.UNREACHABLE, `No connection (${err.code ?? 'error'})`),
@@ -190,7 +193,7 @@ export class NadLink {
           return;
         }
         settled = true;
-        clearTimeout(timer);
+        this.timers.clearTimeout(timer);
         resolve(socket);
       });
     });
@@ -291,12 +294,16 @@ export class NadLink {
     }
     // A line always carries the state of the device when it wrote it: the
     // late answer of a query that timed out is a fresh state, never dropped.
+    // It answers a query (?) of its key; a command (=) only when it carries
+    // the value asked: any other line of the key (a late answer, a refusal)
+    // is a state, and the command ends at its deadline, "sent, without
+    // confirmation".
     const before = this.state;
     this.state = applyLine(this.state, line);
     const current = this.current;
-    if (current && current.key === line.key) {
+    if (current && current.key === line.key && (!current.confirm || current.confirm(line.value))) {
       this.current = undefined;
-      clearTimeout(current.timer);
+      this.timers.clearTimeout(current.timer);
       current.resolve(line.value);
       this.pump();
     }
@@ -310,7 +317,7 @@ export class NadLink {
     const current = this.current;
     this.current = undefined;
     if (current) {
-      clearTimeout(current.timer);
+      this.timers.clearTimeout(current.timer);
       current.reject(
         new DeviceError(ERROR_KINDS.CLOSED, 'Connection closed before the answer', { sent: true }),
       );
@@ -344,12 +351,15 @@ export class NadLink {
 
   /**
    * One exchange: writes `key<operator>[value]` and resolves with the value
-   * of the first line of the same key. `timeoutMs` counts from now, the wait
-   * for the turn included. `onSent` is called right before the bytes leave.
+   * of the first line of the same key (for `=`, the first one carrying the
+   * value asked). `timeoutMs` counts from now, the wait for the turn
+   * included. `shouldSend` is asked again right before the write: false drops
+   * the exchange (CANCELLED, nothing sent). `onSent` is called right before
+   * the bytes leave.
    * Before that, every failure is "nothing sent" (UNREACHABLE, BUDGET);
    * after, TIMEOUT and CLOSED (`sent: true`).
    */
-  exchange(key, operator, value, timeoutMs, { onSent, priority = false } = {}) {
+  exchange(key, operator, value, timeoutMs, { onSent, shouldSend, priority = false } = {}) {
     if (!this.open) {
       return Promise.reject(
         new DeviceError(ERROR_KINDS.UNREACHABLE, 'Not connected: nothing sent'),
@@ -374,8 +384,10 @@ export class NadLink {
         key: key.toLowerCase(),
         bytes,
         socket: this.socket,
-        deadline: Date.now() + timeoutMs,
+        deadline: this.now() + timeoutMs,
         onSent,
+        shouldSend,
+        confirm: operator === '=' ? (answered) => confirmsSet(key, value, answered) : undefined,
         priority,
         resolve,
         reject,
@@ -396,7 +408,7 @@ export class NadLink {
   pump() {
     while (!this.current && this.queue.length > 0) {
       const item = this.queue.shift();
-      const remaining = item.deadline - Date.now();
+      const remaining = item.deadline - this.now();
       if (remaining <= 0) {
         item.reject(new DeviceError(ERROR_KINDS.BUDGET, 'No time left: nothing sent'));
         continue;
@@ -405,8 +417,18 @@ export class NadLink {
         item.reject(new DeviceError(ERROR_KINDS.UNREACHABLE, 'Not connected: nothing sent'));
         continue;
       }
-      const entry = { key: item.key, resolve: item.resolve, reject: item.reject, timer: undefined };
-      entry.timer = setTimeout(() => {
+      if (item.shouldSend && !item.shouldSend()) {
+        item.reject(new DeviceError(ERROR_KINDS.CANCELLED, 'Cancelled by Standby, nothing sent'));
+        continue;
+      }
+      const entry = {
+        key: item.key,
+        confirm: item.confirm,
+        resolve: item.resolve,
+        reject: item.reject,
+        timer: undefined,
+      };
+      entry.timer = this.timers.setTimeout(() => {
         if (this.current !== entry) {
           return;
         }
@@ -424,7 +446,7 @@ export class NadLink {
         item.socket.write(item.bytes);
       } catch (err) {
         this.current = undefined;
-        clearTimeout(entry.timer);
+        this.timers.clearTimeout(entry.timer);
         item.reject(new DeviceError(ERROR_KINDS.UNREACHABLE, `Not sent: ${err.message}`));
       }
     }
