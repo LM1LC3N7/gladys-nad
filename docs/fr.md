@@ -1,67 +1,121 @@
-# Template de démonstration
+# NAD pour Gladys
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Pilotez depuis Gladys vos amplis et amplis-tuners **NAD** dotés d'un port de
+contrôle réseau (T 758, T 778, T 787, C 338, C 368, C 658, M10…), en local,
+sans aucun cloud : allumage, veille, volume (plafonné), sourdine et source.
+
+> **Important.** Cette intégration n'a jamais été testée avec un vrai
+> appareil : elle a été écrite à partir de la bibliothèque `nad_receiver`
+> (celle qu'utilise Home Assistant) et testée avec un faux appareil
+> seulement. Vos retours sont les bienvenus. Intégration non officielle, sans
+> lien avec NAD Electronics.
+
+## Installation
+
+1. Branchez l'appareil sur votre réseau et donnez-lui une **adresse IP fixe**
+   dans votre box (bail DHCP réservé).
+2. Sur l'appareil, activez la **veille réseau** (ou « contrôle IP » /
+   « contrôle réseau » selon le modèle), pour qu'il réponde encore en veille
+   et puisse être réveillé.
+3. Dans Gladys, installez l'intégration **NAD**, puis ouvrez sa
+   configuration.
+4. Saisissez les adresses IP, séparées par des virgules (par exemple
+   `192.168.1.50, 192.168.1.51`). Le port de contrôle est le 23 (telnet) ;
+   pour un autre, ajoutez-le : `192.168.1.50:53`.
+5. Choisissez le **plafond de volume** en dB (-20 dB par défaut) et, si vous
+   le souhaitez, le volume le plus bas (-80 dB par défaut).
+6. Les appareils apparaissent dans l'onglet **Découverte** : créez-les.
+
+L'intégration garde une connexion ouverte avec chaque appareil : ce qui est
+changé sur l'appareil ou sa télécommande s'affiche aussitôt dans Gladys. Les
+états sont aussi relus chaque minute.
+
+Seul le port réseau est pris en charge : le **port série RS-232** ne l'est
+pas (une intégration Gladys tourne dans un conteneur sans accès au port
+série).
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+| Fonction | Type Gladys                    | Remarque                                                 |
+| -------- | ------------------------------ | -------------------------------------------------------- |
+| Marche   | état binaire (lecture seule)   | 1 allumé, 0 en veille ou injoignable                     |
+| Allumer  | bouton                         | `Main.Power=On`                                          |
+| Veille   | bouton                         | `Main.Power=Off`                                         |
+| Volume   | musique / volume (0 à 100)     | 0 % = volume le plus bas, 100 % = le plafond             |
+| Sourdine | bouton (télévision / sourdine) | chaque appui lit l'état, puis règle l'inverse            |
+| Source   | liste déroulante               | les entrées de l'appareil ; la liste ne fait que grandir |
 
-## Configuration
+Volontairement, aucun **interrupteur** : un « éteins tout » ou « allume
+tout » d'un assistant vocal ou d'une scène ne réveille ni ne coupe votre
+ampli.
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+## Plafond de volume
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+Les appareils NAD comptent leur volume en dB (par exemple -35 dB). Dans
+Gladys, le volume va de 0 à 100 % : 0 % est le volume le plus bas de la
+configuration (-80 dB par défaut), 100 % est le **plafond** (-20 dB par
+défaut). Gladys (tableau de bord, scène, assistant vocal) ne peut jamais
+régler un volume au-dessus du plafond. Le plafond est relu juste avant
+l'envoi : une nouvelle valeur enregistrée s'applique aussitôt.
 
-## Actions
+Le volume réglé sur l'appareil lui-même (bouton, télécommande) n'est pas
+modifié par l'intégration (au-dessus du plafond, Gladys affiche 100 %), sauf
+dans les deux cas où Gladys le rendrait audible :
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+- **Retrait de la sourdine** : si le volume de l'appareil dépasse le plafond,
+  il est d'abord ramené au plafond, puis la sourdine est retirée. Si le
+  volume ne peut pas être lu, rien n'est envoyé.
+- **Allumage** : après le réveil, le volume est relu et ramené au plafond
+  s'il le dépasse. Si l'appareil est lent à se réveiller, l'intégration
+  vérifie encore quelques fois pendant environ 15 secondes ; ensuite le
+  volume n'est plus corrigé.
 
-## Scènes
+## Sources
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Les entrées sont des numéros (1, 2, 3…). Leurs noms sont lus sur l'appareil
+quand il les donne (`Source1.Name`…) ; sinon, saisissez-les dans la
+configuration, par exemple `1=CD, 2=Tuner, 3=TV`. Une entrée choisie sur
+l'appareil est ajoutée à la liste.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Commandes
 
-## Tableau de bord
+Chaque commande reçoit une réponse en moins de 4 secondes (Gladys attend 5
+secondes). Une commande partie vers l'appareil sans confirmation est
+signalée « envoyée, sans confirmation » ; la ligne écrite par l'appareil
+montre ensuite ce qu'il a fait. Une commande qui n'a pas pu partir est
+signalée « rien n'a été envoyé » : c'est le cas de toute commande, veille
+comprise, vers un appareil non connecté. La **veille** passe avant toutes
+les commandes en attente, et annule un allumage encore en attente.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+## Reconnexion
 
-## Dépannage
+Un appareil qui ne répond pas (éteint, veille réseau désactivée, débranché)
+affiche sa marche à 0 et est nommé dans le statut de l'intégration.
+L'intégration se reconnecte après 10 s, puis à intervalles doublés après
+chaque échec, jusqu'à 5 minutes. Deux relectures de suite sans réponse
+ferment la connexion, puis la même reconnexion espacée s'applique.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+## Bouton de configuration
+
+- **Vérifier les appareils** : la connexion, la marche, le volume (en dB), la
+  sourdine et la source de chaque appareil, et la plage de volume en vigueur.
+
+## Données et vie privée
+
+L'intégration ne demande ni compte ni mot de passe : le port de contrôle NAD
+n'en a pas. Elle garde dans `/data/nad.json` la liste des appareils connus
+(adresse, modèle, sources). Rien ne sort de votre réseau local.
+
+## Limites connues
+
+- Une seule zone (la principale) ; pas de tuner, d'enceintes A/B, de
+  luminosité, de minuterie ni de mode d'écoute.
+- Certains modèles (par exemple le C 356BEE) ne savent ni donner ni régler un
+  volume absolu, seulement le monter ou le baisser : le volume reste alors
+  inconnu.
+- Le protocole binaire des D 7050 / D 3045 (port 50001) n'est pas pris en
+  charge.
+- Home Assistant utilise par défaut le port 53 pour ce protocole,
+  `nad_receiver` le port 23 : si votre appareil ne répond pas sur le 23,
+  essayez `:53`.
+- Jamais testé avec un vrai appareil : les vraies réponses peuvent différer.

@@ -1,177 +1,96 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "NAD",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "NAD amplifiers and receivers, local over telnet: power, volume, mute, source.",
+    "fr": "Amplis et amplis-tuners NAD en local par telnet : marche, volume, sourdine, source."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-nad:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-nad/main/cover.png",
+  "categories": ["multimedia"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your NAD devices, on your local network",
+        "fr": "Vos appareils NAD, sur votre réseau local"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Power on, standby, volume, mute and source of each NAD amplifier or receiver with a network control port (telnet, port 23: T 758, T 778, T 787, C 338, C 368, C 658, M10...), without any cloud. The RS-232 serial port is not supported. Give each device a fixed IP address in your router and type it below; the devices then appear in the Discovery tab. 100 % in Gladys is the volume cap below, never exceeded. Enable the network standby of the device so it can be woken up. Never tested with a real device. Unofficial integration, not affiliated with NAD Electronics.",
+        "fr": "Allumage, veille, volume, sourdine et source de chaque ampli ou ampli-tuner NAD doté d'un port de contrôle réseau (telnet, port 23 : T 758, T 778, T 787, C 338, C 368, C 658, M10...), sans aucun cloud. Le port série RS-232 n'est pas pris en charge. Donnez à chaque appareil une adresse IP fixe dans votre box et saisissez-la ci-dessous ; les appareils apparaissent alors dans l'onglet Découverte. 100 % dans Gladys correspond au plafond de volume ci-dessous, jamais dépassé. Activez la veille réseau de l'appareil pour pouvoir le réveiller. Jamais testé avec un vrai appareil. Intégration non officielle, sans lien avec NAD Electronics."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-nad/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-nad/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "addresses",
+      "type": "string",
+      "label": { "en": "IP addresses of the devices", "fr": "Adresses IP des appareils" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "Separated by commas, for example 192.168.1.50, 192.168.1.51. Port 23 by default; add :port for another one.",
+        "fr": "Séparées par des virgules, par exemple 192.168.1.50, 192.168.1.51. Port 23 par défaut ; ajoutez :port pour un autre."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "placeholder": { "en": "192.168.1.50", "fr": "192.168.1.50" },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "default": ""
     },
     {
-      "key": "poll_frequency",
+      "key": "max_volume_db",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": { "en": "Volume cap (dB)", "fr": "Plafond de volume (dB)" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "The loudest volume Gladys may set, in dB as shown by the device (from -80 to 0, -20 by default): it is 100 % in Gladys. A scene, a voice assistant or the dashboard can never go above it. The volume set on the device itself (knob, remote) is not changed.",
+        "fr": "Le volume le plus fort que Gladys peut régler, en dB comme affiché par l'appareil (de -80 à 0, -20 par défaut) : c'est 100 % dans Gladys. Une scène, un assistant vocal ou le tableau de bord ne peuvent jamais le dépasser. Le volume réglé sur l'appareil lui-même (bouton, télécommande) n'est pas modifié."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": -20,
+      "min": -80,
+      "max": 0
+    },
+    {
+      "key": "min_volume_db",
+      "type": "number",
+      "label": { "en": "Lowest volume (dB)", "fr": "Volume le plus bas (dB)" },
+      "description": {
+        "en": "The volume of 0 % in Gladys, in dB (from -99 to -21, -80 by default; at least 10 dB under the cap).",
+        "fr": "Le volume de 0 % dans Gladys, en dB (de -99 à -21, -80 par défaut ; au moins 10 dB sous le plafond)."
+      },
+      "required": false,
+      "default": -80,
+      "min": -99,
+      "max": -21
+    },
+    {
+      "key": "source_names",
+      "type": "string",
+      "label": { "en": "Source names (optional)", "fr": "Noms des sources (facultatif)" },
+      "description": {
+        "en": "For the models that do not tell the names of their inputs: number=name, separated by commas, for example 1=CD, 2=Tuner, 3=TV.",
+        "fr": "Pour les modèles qui ne donnent pas le nom de leurs entrées : numéro=nom, séparés par des virgules, par exemple 1=CD, 2=Tuner, 3=TV."
+      },
+      "placeholder": { "en": "1=CD, 2=Tuner, 3=TV", "fr": "1=CD, 2=Tuner, 3=TV" },
+      "required": false,
+      "default": ""
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "check_devices",
+      "label": { "en": "Check the devices", "fr": "Vérifier les appareils" },
       "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

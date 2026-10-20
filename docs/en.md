@@ -1,61 +1,112 @@
-# Demo Devices Template
+# NAD for Gladys
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Control your **NAD** amplifiers and receivers that have a network control
+port (T 758, T 778, T 787, C 338, C 368, C 658, M10…) from Gladys, locally,
+without any cloud: power on, standby, volume (capped), mute and source.
+
+> **Important.** This integration has never been tested with a real device:
+> it was written from the `nad_receiver` library (the one Home Assistant
+> uses) and tested against a fake device only. Your feedback is welcome.
+> Unofficial integration, not affiliated with NAD Electronics.
+
+## Setup
+
+1. Connect the device to your network and give it a **fixed IP address** in
+   your router (reserved DHCP lease).
+2. On the device, enable the **network standby** (or "IP control" / "network
+   control", depending on the model), so it still answers in standby and can
+   be woken up.
+3. In Gladys, install the **NAD** integration, then open its configuration.
+4. Type the IP addresses, separated by commas (for example
+   `192.168.1.50, 192.168.1.51`). The control port is 23 (telnet); for
+   another one, add it: `192.168.1.50:53`.
+5. Choose the **volume cap** in dB (-20 dB by default) and, if you want, the
+   lowest volume (-80 dB by default).
+6. The devices appear in the **Discovery** tab: create them.
+
+The integration keeps one connection open with each device: changes made on
+the device or its remote show in Gladys right away. The states are also read
+again every minute.
+
+Only the network port is supported: the **RS-232 serial port** is not (a
+Gladys integration runs in a container without serial port access).
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+| Feature  | Gladys type                | Note                                               |
+| -------- | -------------------------- | -------------------------------------------------- |
+| Power    | binary state (read only)   | 1 on, 0 in standby or unreachable                  |
+| Power on | button                     | `Main.Power=On`                                    |
+| Standby  | button                     | `Main.Power=Off`                                   |
+| Volume   | music / volume (0 to 100)  | 0 % = lowest volume, 100 % = the cap               |
+| Mute     | button (television / mute) | each press reads the state, then sets the opposite |
+| Source   | dropdown                   | the inputs of the device; the list only grows      |
 
-## Configuration
+On purpose, no **switch**: an "everything off" or "everything on" from a
+voice assistant or a scene neither wakes nor cuts your amplifier.
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+## Volume cap
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+NAD devices count their volume in dB (for example -35 dB). In Gladys, the
+volume goes from 0 to 100 %: 0 % is the lowest volume of the configuration
+(-80 dB by default), 100 % is the **cap** (-20 dB by default). Gladys
+(dashboard, scene, voice assistant) can never set a volume above the cap. The
+cap is read again just before sending: a new value saved applies at once.
 
-## Actions
+The volume set on the device itself (knob, remote) is not changed by the
+integration (above the cap, Gladys shows 100 %), except in the two cases
+where Gladys would make it heard:
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+- **Unmute**: when the volume of the device is above the cap, it is set to
+  the cap first, then the mute is removed. When the volume cannot be read,
+  nothing is sent.
+- **Power on**: after the wake-up, the volume is read again and set to the
+  cap when above it. When the device is slow to wake up, the integration
+  checks again a few times for about 15 seconds; after that the volume is not
+  corrected.
 
-## Scenes
+## Sources
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+The inputs are numbers (1, 2, 3…). Their names are read from the device when
+it tells them (`Source1.Name`…); otherwise, type them in the configuration,
+for example `1=CD, 2=Tuner, 3=TV`. An input the device switches to is added
+to the list.
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## Commands
 
-## Dashboard
+Every command is answered within 4 seconds (Gladys waits 5 seconds). A
+command that left for the device without confirmation is reported "sent,
+without confirmation"; the line written by the device then shows what it
+did. A command that could not leave is reported "nothing sent": so is any
+command, Standby included, to a device that is not connected. **Standby**
+goes before every command waiting, and cancels a Power on still waiting.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## Reconnection
 
-## Troubleshooting
+A device that does not answer (off, network standby disabled, unplugged)
+shows its power at 0 and is named in the integration status. The integration
+connects again after 10 s, then at intervals doubled after each failure, up
+to 5 minutes. Two polls in a row without an answer close the connection,
+then the same spaced reconnection applies.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+## Configuration button
+
+- **Check the devices**: the connection, power, volume (in dB), mute and
+  source of each device, and the volume range in force.
+
+## Data and privacy
+
+The integration asks for no account and no password: the NAD control port
+has none. It keeps in `/data/nad.json` the list of the known devices
+(address, model, sources). Nothing leaves your local network.
+
+## Known limits
+
+- One zone (the main one); no tuner, speakers A/B, dimmer, sleep or listening
+  mode.
+- Some models (for example the C 356BEE) cannot report or set an absolute
+  volume, only step it: the volume stays unknown there.
+- The binary protocol of the D 7050 / D 3045 (port 50001) is not supported.
+- Home Assistant uses port 53 by default for this protocol, `nad_receiver`
+  port 23: if your device does not answer on 23, try `:53`.
+- Never tested with a real device: the real answers may differ.
