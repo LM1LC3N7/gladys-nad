@@ -6,8 +6,8 @@
     "en": "NAD amplifiers and receivers, local over telnet: power, volume, mute, source.",
     "fr": "Amplis et amplis-tuners NAD en local par telnet : marche, volume, sourdine, source."
   },
-  "version": "0.1.0",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-nad:0.1.0",
+  "version": "0.1.1",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-nad:0.1.1",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-nad/main/cover.png",
   "categories": ["multimedia"],

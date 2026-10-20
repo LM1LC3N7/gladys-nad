@@ -1,6 +1,6 @@
 {
   "name": "gladys-nad",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for NAD amplifiers and receivers (power, volume capped by an option, mute, source) over their local telnet control port. Unofficial, not affiliated with NAD Electronics.",
   "type": "module",
